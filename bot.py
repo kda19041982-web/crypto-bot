@@ -16,7 +16,7 @@ CHECK_INTERVAL = 10             # Интервал проверки рынка (
 PRICE_CHANGE_THRESHOLD = 0.8    # Порог резкого скачка цены (%)
 MIN_LIQ_USDT = 10000            # Минимальный объем ликвидации ($)
 
-# Список отслеживаемых пар по умолчанию
+# Динамический список отслеживаемых пар по умолчанию (теперь управляется через бота!)
 SYMBOLS = [
     "BTCUSDT"
 ]
@@ -76,9 +76,10 @@ def get_recent_liquidations(symbol):
 def get_main_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Активные уровни", callback_data="btn_levels")
+    builder.button(text="🪙 Монеты в фоне", callback_data="btn_tokens")
     builder.button(text="📊 Статус системы", callback_data="btn_status")
-    builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
-    builder.adjust(2, 1)
+    builder.button(text="🗑 Очистить уровни", callback_data="btn_clear")
+    builder.adjust(2, 2)
     return builder.as_markup()
 
 
@@ -87,15 +88,13 @@ def get_main_menu_keyboard():
 async def cmd_start(message: types.Message):
     welcome_text = (
         "Крипто-Монитор Бот v6.0 запущен!\n\n"
-        "Интерактивное управление и кнопки активированы:\n"
-        "- Управление ценовыми уровнями через команды или меню\n"
-        "- Контроль резких импульсов цены (от 0.8%)\n"
-        "- Фильтрация крупных ликвидаций (от $10k)\n\n"
-        "Команды:\n"
-        "/add BTCUSDT 95000 - Постоянный алерт\n"
-        "/add_once BTCUSDT 95000 - Одноразовый алерт\n"
-        "/levels - Список уровней с номерами для удаления\n"
-        "/clear - Очистить все уровни"
+        "Управление монетами и уровнями:\n"
+        "/add_token MEGAUSDT — Добавить монету в фоновый сканер\n"
+        "/del_token MEGAUSDT — Удалить монету из фонового сканера\n"
+        "/tokens — Список монет, отслеживаемых в фоне\n\n"
+        "/add BTCUSDT 95000 — Постоянный ценовой уровень\n"
+        "/add_once BTCUSDT 95000 — Одноразовый уровень\n"
+        "/levels — Список уровней"
     )
     await message.answer(welcome_text, reply_markup=get_main_menu_keyboard())
 
@@ -105,12 +104,55 @@ async def cmd_status(message: types.Message):
     active_levels_count = sum(len(v) for v in custom_levels.values())
     status_text = (
         "Система мониторинга активна (24/7)\n\n"
-        f"Мониторится пар: {len(SYMBOLS)}\n"
+        f"Мониторится пар в фоне: {len(SYMBOLS)} ({', '.join(SYMBOLS)})\n"
         f"Активных пользовательских уровней: {active_levels_count}\n"
         f"Порог скачка: {PRICE_CHANGE_THRESHOLD}%\n"
         f"Мин. объем ликвидации: ${MIN_LIQ_USDT:,.0f}"
     )
     await message.answer(status_text, reply_markup=get_main_menu_keyboard())
+
+
+@dp.message(Command("add_token"))
+async def cmd_add_token(message: types.Message):
+    try:
+        _, symbol = message.text.split()
+        symbol = symbol.upper()
+        if symbol not in SYMBOLS:
+            SYMBOLS.append(symbol)
+            await message.answer(f"✅ Монета **{symbol}** добавлена в фоновый мониторинг (импульсы + ликвидации).", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+        else:
+            await message.answer(f"⚠️ Монета **{symbol}** уже есть в списке отслеживания.", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+    except Exception:
+        await message.answer("❌ Ошибка формата. Пример: `/add_token MEGAUSDT`", parse_mode="Markdown")
+
+
+@dp.message(Command("del_token"))
+async def cmd_del_token(message: types.Message):
+    try:
+        _, symbol = message.text.split()
+        symbol = symbol.upper()
+        if symbol in SYMBOLS:
+            SYMBOLS.remove(symbol)
+            # Также удалим из состояний цены
+            if symbol in price_states:
+                del price_states[symbol]
+            await message.answer(f"🗑 Монета **{symbol}** удалена из фонового мониторинга.", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+        else:
+            await message.answer(f"⚠️ Монета **{symbol}** не найдена в текущем списке.", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+    except Exception:
+        await message.answer("❌ Ошибка формата. Пример: `/del_token MEGAUSDT`", parse_mode="Markdown")
+
+
+@dp.message(Command("tokens"))
+async def cmd_show_tokens(message: types.Message):
+    text = "🪙 **Монеты в фоновом мониторинге:**\n\n"
+    builder = InlineKeyboardBuilder()
+    for sym in SYMBOLS:
+        text += f"• `{sym}`\n"
+        builder.button(text=f"❌ Удалить {sym}", callback_data=f"del_sym_{sym}")
+    builder.button(text="📋 Активные уровни", callback_data="btn_levels")
+    builder.adjust(1)
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
 @dp.message(Command("add"))
@@ -168,7 +210,7 @@ async def cmd_show_levels(message: types.Message):
                 mode = "🕯 Пост." if not item['once'] else "⚡ Однор."
                 text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
                 
-                builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                builder.button(text=f"❌ Удалить #{idx} ({sym} {item['price']})", callback_data=f"del_lvl_{item['id']}")
                 idx += 1
                 
     builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
@@ -201,9 +243,19 @@ async def callback_handler(callback: types.CallbackQuery):
                 for item in lvl_list:
                     mode = "Постоянный" if not item['once'] else "Одноразовый"
                     text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
-                    builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                    builder.button(text=f"❌ Удалить #{idx} ({sym} {item['price']})", callback_data=f"del_lvl_{item['id']}")
                     idx += 1
         builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+    elif data == "btn_tokens":
+        text = "🪙 **Монеты в фоновом мониторинге:**\n\n"
+        builder = InlineKeyboardBuilder()
+        for sym in SYMBOLS:
+            text += f"• `{sym}`\n"
+            builder.button(text=f"❌ Удалить {sym}", callback_data=f"del_sym_{sym}")
+        builder.button(text="📋 Активные уровни", callback_data="btn_levels")
         builder.adjust(1)
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -211,7 +263,7 @@ async def callback_handler(callback: types.CallbackQuery):
         active_levels_count = sum(len(v) for v in custom_levels.values())
         status_text = (
             "Система мониторинга активна (24/7)\n\n"
-            f"Мониторится пар: {len(SYMBOLS)}\n"
+            f"Мониторится пар в фоне: {len(SYMBOLS)} ({', '.join(SYMBOLS)})\n"
             f"Активных пользовательских уровней: {active_levels_count}\n"
             f"Порог скачка: {PRICE_CHANGE_THRESHOLD}%\n"
             f"Мин. объем ликвидации: ${MIN_LIQ_USDT:,.0f}"
@@ -221,6 +273,24 @@ async def callback_handler(callback: types.CallbackQuery):
     elif data == "btn_clear":
         custom_levels.clear()
         await callback.message.edit_text("Все пользовательские уровни успешно очищены.", reply_markup=get_main_menu_keyboard())
+
+    elif data.startswith("del_sym_"):
+        target_sym = data.replace("del_sym_", "")
+        if target_sym in SYMBOLS:
+            SYMBOLS.remove(target_sym)
+            if target_sym in price_states:
+                del price_states[target_sym]
+            await callback.answer(f"Монета {target_sym} удалена из фона!")
+            
+            # Перерисовываем список монет
+            text = "🪙 **Монеты в фоновом мониторинге:**\n\n"
+            builder = InlineKeyboardBuilder()
+            for sym in SYMBOLS:
+                text += f"• `{sym}`\n"
+                builder.button(text=f"❌ Удалить {sym}", callback_data=f"del_sym_{sym}")
+            builder.button(text="📋 Активные уровни", callback_data="btn_levels")
+            builder.adjust(1)
+            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
     elif data.startswith("del_lvl_"):
         target_id = int(data.split("_")[2])
@@ -245,23 +315,21 @@ async def callback_handler(callback: types.CallbackQuery):
                         for item in lvl_list:
                             mode = "Постоянный" if not item['once'] else "Одноразовый"
                             text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
-                            builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                            builder.button(text=f"❌ Удалить #{idx} ({sym} {item['price']})", callback_data=f"del_lvl_{item['id']}")
                             idx += 1
                 builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
                 builder.adjust(1)
                 await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-        else:
-            await callback.answer("Уровень не найден.")
 
     await callback.answer()
 
 
 # ================= Основной Фоновый Цикл =================
 async def price_checker():
-    logging.info("Запуск фонового мониторинга с инлайн-управлением...")
+    logging.info("Запуск фонового мониторинга с динамическими монетами...")
     while True:
         try:
-            for symbol in SYMBOLS:
+            for symbol in list(SYMBOLS):
                 current_price = get_current_price(symbol)
                 if not current_price:
                     continue
