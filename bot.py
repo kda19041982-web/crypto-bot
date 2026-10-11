@@ -470,3 +470,14 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+import os
+from aiohttp import web
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", lambda r: web.Response(text="OK"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    await web.TCPSite(runner, "0.0.0.0", port).start()
