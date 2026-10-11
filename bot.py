@@ -165,15 +165,14 @@ async def cmd_show_levels(message: types.Message):
         if lvl_list:
             text += f"*{sym}*:\n"
             for item in lvl_list:
-                mode = "🕯 Пост." : item['once'] else "⚡ Однор."
+                mode = "🕯 Пост." if not item['once'] else "⚡ Однор."
                 text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
                 
-                # Добавляем инлайн-кнопку для удаления конкретного уровня по его внутреннему ID
                 builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
                 idx += 1
                 
     builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
-    builder.adjust(1) # Кнопки удаления в столбик для удобства
+    builder.adjust(1)
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
@@ -189,7 +188,6 @@ async def callback_handler(callback: types.CallbackQuery):
     data = callback.data
     
     if data == "btn_levels":
-        # Имитируем вывод команды /levels
         if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
             await callback.message.edit_text("Нет активных отслеживаемых уровней.", reply_markup=get_main_menu_keyboard())
             return
@@ -235,11 +233,9 @@ async def callback_handler(callback: types.CallbackQuery):
             
         if removed:
             await callback.answer("Уровень удален!")
-            # Обновляем список на экране
             if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
                 await callback.message.edit_text("Все уровни удалены. Список пуст.", reply_markup=get_main_menu_keyboard())
             else:
-                # Перерисовываем актуальные уровни
                 text = "Активные уровни:\n\n"
                 builder = InlineKeyboardBuilder()
                 idx = 1
