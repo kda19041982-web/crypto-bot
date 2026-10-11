@@ -4,6 +4,7 @@ import os
 import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 
 # ================= Конфигурация и Ключи =================
@@ -15,7 +16,7 @@ CHECK_INTERVAL = 10             # Интервал проверки рынка (
 PRICE_CHANGE_THRESHOLD = 0.8    # Порог резкого скачка цены (%)
 MIN_LIQ_USDT = 10000            # Минимальный объем ликвидации ($)
 
-# Список отслеживаемых пар (оставлен только биткоин)
+# Список отслеживаемых пар по умолчанию
 SYMBOLS = [
     "BTCUSDT"
 ]
@@ -29,10 +30,11 @@ logging.basicConfig(
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище состояний и пользовательских уровней
+# Хранилища состояний и уровней
 price_states = {}
 seen_liquidations = {}
-custom_levels = {}
+custom_levels = {}  # { 'BTCUSDT': [{'price': 95000, 'once': False, 'id': 1}] }
+level_id_counter = 1
 
 
 # ================= Встроенный веб-сервер для Render =================
@@ -60,7 +62,7 @@ def get_current_price(symbol):
 
 
 def get_recent_liquidations(symbol):
-    url = f"https://fapi.binance.com/fapi/v1/forceOrders?symbol={symbol}&limit=10"
+    url = f"https://fapi.binance.com/fapi/v1/forceOrders?symbol={symbol}&limit=20"
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
@@ -70,40 +72,50 @@ def get_recent_liquidations(symbol):
     return []
 
 
-# ================= Обработка Команд =================
+# ================= Клавиатуры (Кнопки) =================
+def get_main_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📋 Активные уровни", callback_data="btn_levels")
+    builder.button(text="📊 Статус системы", callback_data="btn_status")
+    builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+# ================= Обработка Команд и Кнопок =================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     welcome_text = (
         "Крипто-Монитор Бот v6.0 запущен!\n\n"
-        "Возможности:\n"
-        "- Сигналы по твоим кастомным уровням (/add, /add_once)\n"
-        "- Отслеживание резких скачков цены (от 0.8%)\n"
-        "- Фильтрация крупных ликвидаций (от $10,000)\n\n"
+        "Интерактивное управление и кнопки активированы:\n"
+        "- Управление ценовыми уровнями через команды или меню\n"
+        "- Контроль резких импульсов цены (от 0.8%)\n"
+        "- Фильтрация крупных ликвидаций (от $10k)\n\n"
         "Команды:\n"
-        "/add BTCUSDT 95000 - Постоянный алерт по уровню\n"
-        "/add_once BTCUSDT 95000 - Одноразовый алерт по уровню\n"
-        "/levels - Просмотр твоих активных уровней\n"
-        "/clear - Удалить все уровни\n"
-        "/status - Статус работы бота"
+        "/add BTCUSDT 95000 - Постоянный алерт\n"
+        "/add_once BTCUSDT 95000 - Одноразовый алерт\n"
+        "/levels - Список уровней с номерами для удаления\n"
+        "/clear - Очистить все уровни"
     )
-    await message.answer(welcome_text)
+    await message.answer(welcome_text, reply_markup=get_main_menu_keyboard())
 
 
 @dp.message(Command("status"))
 async def cmd_status(message: types.Message):
     active_levels_count = sum(len(v) for v in custom_levels.values())
     status_text = (
-        "Система работает 24/7 без спама\n\n"
-        f"Мониторится монет: {len(SYMBOLS)}\n"
-        f"Активных твоих уровней: {active_levels_count}\n"
-        f"Порог скачка цены: {PRICE_CHANGE_THRESHOLD}%\n"
+        "Система мониторинга активна (24/7)\n\n"
+        f"Мониторится пар: {len(SYMBOLS)}\n"
+        f"Активных пользовательских уровней: {active_levels_count}\n"
+        f"Порог скачка: {PRICE_CHANGE_THRESHOLD}%\n"
         f"Мин. объем ликвидации: ${MIN_LIQ_USDT:,.0f}"
     )
-    await message.answer(status_text)
+    await message.answer(status_text, reply_markup=get_main_menu_keyboard())
 
 
 @dp.message(Command("add"))
 async def cmd_add_level(message: types.Message):
+    global level_id_counter
     try:
         _, symbol, price = message.text.split()
         symbol = symbol.upper()
@@ -112,14 +124,17 @@ async def cmd_add_level(message: types.Message):
         if symbol not in custom_levels:
             custom_levels[symbol] = []
             
-        custom_levels[symbol].append({'price': price, 'once': False, 'user_id': message.from_user.id})
-        await message.answer(f"Добавлен постоянный алерт: {symbol} на уровень {price}")
+        custom_levels[symbol].append({'price': price, 'once': False, 'id': level_id_counter})
+        level_id_counter += 1
+        
+        await message.answer(f"Добавлен постоянный алерт: {symbol} на уровень {price}", reply_markup=get_main_menu_keyboard())
     except Exception:
         await message.answer("Ошибка формата. Пример: /add BTCUSDT 95000")
 
 
 @dp.message(Command("add_once"))
 async def cmd_add_once_level(message: types.Message):
+    global level_id_counter
     try:
         _, symbol, price = message.text.split()
         symbol = symbol.upper()
@@ -128,8 +143,10 @@ async def cmd_add_once_level(message: types.Message):
         if symbol not in custom_levels:
             custom_levels[symbol] = []
             
-        custom_levels[symbol].append({'price': price, 'once': True, 'user_id': message.from_user.id})
-        await message.answer(f"Добавлен одноразовый алерт: {symbol} на уровень {price}")
+        custom_levels[symbol].append({'price': price, 'once': True, 'id': level_id_counter})
+        level_id_counter += 1
+        
+        await message.answer(f"Добавлен одноразовый алерт: {symbol} на уровень {price}", reply_markup=get_main_menu_keyboard())
     except Exception:
         await message.answer("Ошибка формата. Пример: /add_once BTCUSDT 95000")
 
@@ -137,28 +154,115 @@ async def cmd_add_once_level(message: types.Message):
 @dp.message(Command("levels"))
 async def cmd_show_levels(message: types.Message):
     if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
-        await message.answer("Нет активных отслеживаемых уровней.")
+        await message.answer("Нет активных отслеживаемых уровней.", reply_markup=get_main_menu_keyboard())
         return
         
-    text = "Активные уровни:\n\n"
+    text = "Активные уровни (нажми кнопку ниже для удаления нужного):\n\n"
+    builder = InlineKeyboardBuilder()
+    
+    idx = 1
     for sym, lvl_list in custom_levels.items():
         if lvl_list:
-            text += f"{sym}:\n"
+            text += f"*{sym}*:\n"
             for item in lvl_list:
-                mode = "Одноразовый" if item['once'] else "Постоянный"
-                text += f"  - {item['price']} USDT ({mode})\n"
-    await message.answer(text)
+                mode = "🕯 Пост." : item['once'] else "⚡ Однор."
+                text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
+                
+                # Добавляем инлайн-кнопку для удаления конкретного уровня по его внутреннему ID
+                builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                idx += 1
+                
+    builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
+    builder.adjust(1) # Кнопки удаления в столбик для удобства
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
 @dp.message(Command("clear"))
 async def cmd_clear_levels(message: types.Message):
     custom_levels.clear()
-    await message.answer("Все уровни очищены.")
+    await message.answer("Все пользовательские уровни очищены.", reply_markup=get_main_menu_keyboard())
+
+
+# ================= Обработка нажатий на инлайн-кнопки =================
+@dp.callback_query()
+async def callback_handler(callback: types.CallbackQuery):
+    data = callback.data
+    
+    if data == "btn_levels":
+        # Имитируем вывод команды /levels
+        if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
+            await callback.message.edit_text("Нет активных отслеживаемых уровней.", reply_markup=get_main_menu_keyboard())
+            return
+            
+        text = "Активные уровни:\n\n"
+        builder = InlineKeyboardBuilder()
+        idx = 1
+        for sym, lvl_list in custom_levels.items():
+            if lvl_list:
+                text += f"*{sym}*:\n"
+                for item in lvl_list:
+                    mode = "Постоянный" if not item['once'] else "Одноразовый"
+                    text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
+                    builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                    idx += 1
+        builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+    elif data == "btn_status":
+        active_levels_count = sum(len(v) for v in custom_levels.values())
+        status_text = (
+            "Система мониторинга активна (24/7)\n\n"
+            f"Мониторится пар: {len(SYMBOLS)}\n"
+            f"Активных пользовательских уровней: {active_levels_count}\n"
+            f"Порог скачка: {PRICE_CHANGE_THRESHOLD}%\n"
+            f"Мин. объем ликвидации: ${MIN_LIQ_USDT:,.0f}"
+        )
+        await callback.message.edit_text(status_text, reply_markup=get_main_menu_keyboard())
+
+    elif data == "btn_clear":
+        custom_levels.clear()
+        await callback.message.edit_text("Все пользовательские уровни успешно очищены.", reply_markup=get_main_menu_keyboard())
+
+    elif data.startswith("del_lvl_"):
+        target_id = int(data.split("_")[2])
+        removed = False
+        for sym in list(custom_levels.keys()):
+            custom_levels[sym] = [lvl for lvl in custom_levels[sym] if lvl['id'] != target_id]
+            if not custom_levels[sym]:
+                del custom_levels[sym]
+            removed = True
+            
+        if removed:
+            await callback.answer("Уровень удален!")
+            # Обновляем список на экране
+            if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
+                await callback.message.edit_text("Все уровни удалены. Список пуст.", reply_markup=get_main_menu_keyboard())
+            else:
+                # Перерисовываем актуальные уровни
+                text = "Активные уровни:\n\n"
+                builder = InlineKeyboardBuilder()
+                idx = 1
+                for sym, lvl_list in custom_levels.items():
+                    if lvl_list:
+                        text += f"*{sym}*:\n"
+                        for item in lvl_list:
+                            mode = "Постоянный" if not item['once'] else "Одноразовый"
+                            text += f"  {idx}. Уровень: `{item['price']}` USDT ({mode})\n"
+                            builder.button(text=f"❌ Удалить #{idx} ({item['price']})", callback_data=f"del_lvl_{item['id']}")
+                            idx += 1
+                builder.button(text="🗑 Очистить всё", callback_data="btn_clear")
+                builder.adjust(1)
+                await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        else:
+            await callback.answer("Уровень не найден.")
+
+    await callback.answer()
 
 
 # ================= Основной Фоновый Цикл =================
 async def price_checker():
-    logging.info("Запуск фонового мониторинга...")
+    logging.info("Запуск фонового мониторинга с инлайн-управлением...")
     while True:
         try:
             for symbol in SYMBOLS:
@@ -175,16 +279,17 @@ async def price_checker():
                 # 1. Проверка резкого импульса цены
                 price_diff_percent = ((current_price - last_price) / last_price) * 100
                 if abs(price_diff_percent) >= PRICE_CHANGE_THRESHOLD:
-                    dir_icon = "↑" if price_diff_percent > 0 else "↓"
+                    dir_icon = "📈 ↑" if price_diff_percent > 0 else "📉 ↓"
                     await bot.send_message(
                         CHAT_ID,
-                        f"РЕЗКИЙ СКАЧОК ЦЕНЫ ({symbol})!\n"
+                        f"⚡️ РЕЗКИЙ ИМПУЛЬС ({symbol})!\n"
                         f"Движение: {dir_icon} {price_diff_percent:.2f}%\n"
-                        f"Новая цена: {current_price} USDT"
+                        f"Текущая цена: {current_price} USDT",
+                        reply_markup=get_main_menu_keyboard()
                     )
                     price_states[symbol]['last_price'] = current_price
 
-                # 2. Проверка кастомных уровней
+                # 2. Проверка пользовательских уровней
                 if symbol in custom_levels and custom_levels[symbol]:
                     to_remove = []
                     for lvl in custom_levels[symbol]:
@@ -192,9 +297,10 @@ async def price_checker():
                         if (last_price < target_price <= current_price) or (last_price > target_price >= current_price):
                             await bot.send_message(
                                 CHAT_ID,
-                                f"ДОСТИГНУТ ВАШ УРОВЕНЬ ({symbol})!\n"
-                                f"Целевой уровень: {target_price} USDT\n"
-                                f"Текущая цена: {current_price} USDT"
+                                f"🎯 ДОСТИГНУТ УРОВЕНЬ ({symbol})!\n"
+                                f"Цель: {target_price} USDT\n"
+                                f"Цена: {current_price} USDT",
+                                reply_markup=get_main_menu_keyboard()
                             )
                             if lvl['once']:
                                 to_remove.append(lvl)
@@ -202,7 +308,7 @@ async def price_checker():
                     for item in to_remove:
                         custom_levels[symbol].remove(item)
 
-                # 3. Крупные ликвидации
+                # 3. Фильтрация и оповещение по крупным ликвидациям
                 liquidations = get_recent_liquidations(symbol)
                 if liquidations:
                     if symbol not in seen_liquidations:
@@ -217,17 +323,19 @@ async def price_checker():
                             usdt_val = price * float(liq['origQty'])
 
                             if usdt_val >= MIN_LIQ_USDT:
-                                side_text = "ШОРТЫ СБРИТЫ" if liq['side'] == 'BUY' else "ЛОНГОВЫЕ ЛИКВИДАЦИИ"
+                                side = liq['side']
+                                side_text = "🟢 СБРИТЫ ШОРТЫ (Ликвидация продавцов)" if side == 'BUY' else "🔴 СБРИТЫ ЛОНГИ (Лонговая ликвидация)"
                                 await bot.send_message(
                                     CHAT_ID,
-                                    f"КРУПНАЯ ЛИКВИДАЦИЯ ({symbol})!\n"
+                                    f"💥 КРУПНАЯ ЛИКВИДАЦИЯ ({symbol})!\n"
                                     f"{side_text}\n"
                                     f"- Цена: {price} USDT\n"
-                                    f"- Объем: ${usdt_val:,.0f}"
+                                    f"- Объем: ${usdt_val:,.0f}",
+                                    reply_markup=get_main_menu_keyboard()
                                 )
 
-                    if len(seen_liquidations[symbol]) > 50:
-                        seen_liquidations[symbol] = set(list(seen_liquidations[symbol])[-20:])
+                    if len(seen_liquidations[symbol]) > 100:
+                        seen_liquidations[symbol] = set(list(seen_liquidations[symbol])[-50:])
 
                 price_states[symbol]['last_price'] = current_price
 
