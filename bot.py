@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import requests
@@ -16,10 +17,7 @@ CHECK_INTERVAL = 10             # Интервал проверки рынка (
 PRICE_CHANGE_THRESHOLD = 0.8    # Порог резкого скачка цены (%)
 MIN_LIQ_USDT = 10000            # Минимальный объем ликвидации ($)
 
-# Динамический список отслеживаемых пар по умолчанию
-SYMBOLS = [
-    "BTCUSDT"
-]
+DATA_FILE = "data.json"
 
 # Настройка логирования
 logging.basicConfig(
@@ -30,17 +28,46 @@ logging.basicConfig(
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилища состояний и уровней
+# Хранилища состояний
 price_states = {}
 seen_liquidations = {}
-custom_levels = {}  # { 'BTCUSDT': [{'price': 95000, 'once': False, 'id': 1}] }
+SYMBOLS = ["BTCUSDT"]
+custom_levels = {}
 level_id_counter = 1
+
+
+# ================= Работа с локальным JSON-файлом =================
+def load_data():
+    global SYMBOLS, custom_levels, level_id_counter
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                SYMBOLS = data.get("symbols", ["BTCUSDT"])
+                custom_levels = data.get("custom_levels", {})
+                level_id_counter = data.get("level_id_counter", 1)
+                logging.info("Данные успешно загружены из data.json")
+        except Exception as e:
+            logging.error(f"Ошибка чтения data.json: {e}")
+
+
+def save_data():
+    try:
+        data = {
+            "symbols": SYMBOLS,
+            "custom_levels": custom_levels,
+            "level_id_counter": level_id_counter
+        }
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Ошибка сохранения в data.json: {e}")
 
 
 # ================= Встроенный веб-сервер для Render =================
 async def start_web_server():
     app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Crypto Monitoring Bot v6 is Live!"))
+    app.router.add_get("/", lambda r: web.Response(text="Crypto Monitoring Bot v6.1 is Live!"))
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
@@ -83,14 +110,15 @@ def get_persistent_keyboard():
     return builder.as_markup(resize_keyboard=True)
 
 
-# ================= Обработка Команд и Кнопок изнизу =================
+# ================= Обработка Команд и Кнопок =================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     welcome_text = (
-        "Крипто-Монитор Бот v6.0 запущен!\n\n"
-        "Постоянная панель управления внизу экрана активирована.\n\n"
+        "Крипто-Монитор Бот запущен!\n\n"
+        "Все данные (монеты и уровни) автоматически сохраняются.\n\n"
         "Команды управления:\n"
         "/add_token MEGAUSDT — Добавить монету в фон\n"
+        "/del_token MEGAUSDT — Удалить монету из фона\n"
         "/tokens — Список монет в фоне\n"
         "/add BTCUSDT 95000 — Постоянный уровень\n"
         "/add_once BTCUSDT 95000 — Одноразовый уровень\n"
@@ -132,6 +160,7 @@ async def cmd_add_token(message: types.Message):
         symbol = symbol.upper()
         if symbol not in SYMBOLS:
             SYMBOLS.append(symbol)
+            save_data()
             await message.answer(f"✅ Монета **{symbol}** добавлена в фоновый мониторинг.", parse_mode="Markdown", reply_markup=get_persistent_keyboard())
         else:
             await message.answer(f"⚠️ Монета **{symbol}** уже есть в списке.", parse_mode="Markdown", reply_markup=get_persistent_keyboard())
@@ -148,6 +177,7 @@ async def cmd_del_token(message: types.Message):
             SYMBOLS.remove(symbol)
             if symbol in price_states:
                 del price_states[symbol]
+            save_data()
             await message.answer(f"🗑 Монета **{symbol}** удалена из фона.", parse_mode="Markdown", reply_markup=get_persistent_keyboard())
         else:
             await message.answer(f"⚠️ Монета **{symbol}** не найдена.", parse_mode="Markdown", reply_markup=get_persistent_keyboard())
@@ -168,6 +198,7 @@ async def cmd_add_level(message: types.Message):
             
         custom_levels[symbol].append({'price': price, 'once': False, 'id': level_id_counter})
         level_id_counter += 1
+        save_data()
         
         await message.answer(f"Добавлен постоянный алерт: {symbol} на уровень {price}", reply_markup=get_persistent_keyboard())
     except Exception:
@@ -187,6 +218,7 @@ async def cmd_add_once_level(message: types.Message):
             
         custom_levels[symbol].append({'price': price, 'once': True, 'id': level_id_counter})
         level_id_counter += 1
+        save_data()
         
         await message.answer(f"Добавлен одноразовый алерт: {symbol} на уровень {price}", reply_markup=get_persistent_keyboard())
     except Exception:
@@ -220,6 +252,7 @@ async def cmd_show_levels(message: types.Message):
 @dp.message(Command("clear"))
 async def cmd_clear_levels(message: types.Message):
     custom_levels.clear()
+    save_data()
     await message.answer("Все пользовательские уровни очищены.", reply_markup=get_persistent_keyboard())
 
 
@@ -234,6 +267,7 @@ async def callback_handler(callback: types.CallbackQuery):
             SYMBOLS.remove(target_sym)
             if target_sym in price_states:
                 del price_states[target_sym]
+            save_data()
             await callback.answer(f"Монета {target_sym} удалена из фона!")
             
             text = "🪙 **Монеты в фоновом мониторинге:**\n\n"
@@ -254,6 +288,7 @@ async def callback_handler(callback: types.CallbackQuery):
             removed = True
             
         if removed:
+            save_data()
             await callback.answer("Уровень удален!")
             if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
                 await callback.message.edit_text("Все уровни удалены. Список пуст.")
@@ -318,8 +353,10 @@ async def price_checker():
                             if lvl['once']:
                                 to_remove.append(lvl)
                     
-                    for item in to_remove:
-                        custom_levels[symbol].remove(item)
+                    if to_remove:
+                        for item in to_remove:
+                            custom_levels[symbol].remove(item)
+                        save_data()
 
                 # 3. Крупные ликвидации
                 liquidations = get_recent_liquidations(symbol)
@@ -359,6 +396,7 @@ async def price_checker():
 
 # ================= Точка Входа =================
 async def main():
+    load_data()
     asyncio.create_task(start_web_server())
     asyncio.create_task(price_checker())
     await dp.start_polling(bot)
