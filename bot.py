@@ -15,11 +15,9 @@ CHECK_INTERVAL = 10             # Интервал проверки рынка (
 PRICE_CHANGE_THRESHOLD = 0.8    # Порог резкого скачка цены (%)
 MIN_LIQ_USDT = 10000            # Минимальный объем ликвидации ($)
 
-# Список отслеживаемых пар
+# Список отслеживаемых пар (оставлен только биткоин)
 SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT",
-    "SUIUSDT", "NEARUSDT", "APTUSDT", "FETUSDT", "PEPEUSDT"
+    "BTCUSDT"
 ]
 
 # Настройка логирования
@@ -76,32 +74,32 @@ def get_recent_liquidations(symbol):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     welcome_text = (
-        "🚀 **Крипто-Монитор Бот v6.0 запущен!**\n\n"
-        "**Возможности:**\n"
-        "• Сигналы по твоим кастомным уровням (/add, /add_once)\n"
-        "• Отслеживание резких скачков цены (от 0.8%)\n"
-        "• Фильтрация крупных ликвидаций (от $10,000)\n\n"
-        "**Команды:**\n"
-        "`/add BTCUSDT 95000` — Постоянный алерт по уровню\n"
-        "`/add_once BTCUSDT 95000` — Одноразовый алерт по уровню\n"
-        "`/levels` — Просмотр твоих активных уровней\n"
-        "`/clear` — Удалить все уровни\n"
-        "`/status` — Статус работы бота"
+        "Крипто-Монитор Бот v6.0 запущен!\n\n"
+        "Возможности:\n"
+        "- Сигналы по твоим кастомным уровням (/add, /add_once)\n"
+        "- Отслеживание резких скачков цены (от 0.8%)\n"
+        "- Фильтрация крупных ликвидаций (от $10,000)\n\n"
+        "Команды:\n"
+        "/add BTCUSDT 95000 - Постоянный алерт по уровню\n"
+        "/add_once BTCUSDT 95000 - Одноразовый алерт по уровню\n"
+        "/levels - Просмотр твоих активных уровней\n"
+        "/clear - Удалить все уровни\n"
+        "/status - Статус работы бота"
     )
-    await message.answer(welcome_text, parse_mode="Markdown")
+    await message.answer(welcome_text)
 
 
 @dp.message(Command("status"))
 async def cmd_status(message: types.Message):
     active_levels_count = sum(len(v) for v in custom_levels.values())
     status_text = (
-        "✅ **Система работает 24/7 без спама**\n\n"
-        f"• Мониторится монет: `{len(SYMBOLS)}`\n"
-        f"• Активных твоих уровней: `{active_levels_count}`\n"
-        f"• Порог скачка цены: `{PRICE_CHANGE_THRESHOLD}%`\n"
-        f"• Мин. объем ликвидации: `${MIN_LIQ_USDT:,.0f}`"
+        "Система работает 24/7 без спама\n\n"
+        f"Мониторится монет: {len(SYMBOLS)}\n"
+        f"Активных твоих уровней: {active_levels_count}\n"
+        f"Порог скачка цены: {PRICE_CHANGE_THRESHOLD}%\n"
+        f"Мин. объем ликвидации: ${MIN_LIQ_USDT:,.0f}"
     )
-    await message.answer(status_text, parse_mode="Markdown")
+    await message.answer(status_text)
 
 
 @dp.message(Command("add"))
@@ -115,9 +113,9 @@ async def cmd_add_level(message: types.Message):
             custom_levels[symbol] = []
             
         custom_levels[symbol].append({'price': price, 'once': False, 'user_id': message.from_user.id})
-        await message.answer(f"✅ Добавлен постоянный алерт: **{symbol}** на level `{price}`", parse_mode="Markdown")
+        await message.answer(f"Добавлен постоянный алерт: {symbol} на уровень {price}")
     except Exception:
-        await message.answer("❌ Формат: `/add BTCUSDT 95000`", parse_mode="Markdown")
+        await message.answer("Ошибка формата. Пример: /add BTCUSDT 95000")
 
 
 @dp.message(Command("add_once"))
@@ -131,31 +129,31 @@ async def cmd_add_once_level(message: types.Message):
             custom_levels[symbol] = []
             
         custom_levels[symbol].append({'price': price, 'once': True, 'user_id': message.from_user.id})
-        await message.answer(f"🎯 Добавлен одноразовый алерт: **{symbol}** на level `{price}`", parse_mode="Markdown")
+        await message.answer(f"Добавлен одноразовый алерт: {symbol} на уровень {price}")
     except Exception:
-        await message.answer("❌ Формат: `/add_once BTCUSDT 95000`", parse_mode="Markdown")
+        await message.answer("Ошибка формата. Пример: /add_once BTCUSDT 95000")
 
 
 @dp.message(Command("levels"))
 async def cmd_show_levels(message: types.Message):
     if not custom_levels or all(len(v) == 0 for v in custom_levels.values()):
-        await message.answer("📋 Нет активных отслеживаемых уровней.", parse_mode="Markdown")
+        await message.answer("Нет активных отслеживаемых уровней.")
         return
         
-    text = "📋 **Активные уровни:**\n\n"
+    text = "Активные уровни:\n\n"
     for sym, lvl_list in custom_levels.items():
         if lvl_list:
-            text += f"**{sym}**:\n"
+            text += f"{sym}:\n"
             for item in lvl_list:
                 mode = "Одноразовый" if item['once'] else "Постоянный"
-                text += f"  • `{item['price']}` USDT ({mode})\n"
-    await message.answer(text, parse_mode="Markdown")
+                text += f"  - {item['price']} USDT ({mode})\n"
+    await message.answer(text)
 
 
 @dp.message(Command("clear"))
 async def cmd_clear_levels(message: types.Message):
     custom_levels.clear()
-    await message.answer("🗑 Все уровни очищены.", parse_mode="Markdown")
+    await message.answer("Все уровни очищены.")
 
 
 # ================= Основной Фоновый Цикл =================
@@ -174,20 +172,19 @@ async def price_checker():
 
                 last_price = price_states[symbol]['last_price']
                 
-                # 1. Проверка резкого импульса цены (более 0.8% за 10 сек)
+                # 1. Проверка резкого импульса цены
                 price_diff_percent = ((current_price - last_price) / last_price) * 100
                 if abs(price_diff_percent) >= PRICE_CHANGE_THRESHOLD:
-                    dir_icon = "🟢 ↑" if price_diff_percent > 0 else "🔴 ↓"
+                    dir_icon = "↑" if price_diff_percent > 0 else "↓"
                     await bot.send_message(
                         CHAT_ID,
-                        f"⚡️ **РЕЗКИЙ СКАЧОК ЦЕНЫ ({symbol})!**\n"
-                        f"Движение: {dir_icon} **{price_diff_percent:.2f}%**\n"
-                        f"Новая цена: `{current_price}` USDT",
-                        parse_mode="Markdown"
+                        f"РЕЗКИЙ СКАЧОК ЦЕНЫ ({symbol})!\n"
+                        f"Движение: {dir_icon} {price_diff_percent:.2f}%\n"
+                        f"Новая цена: {current_price} USDT"
                     )
                     price_states[symbol]['last_price'] = current_price
 
-                # 2. Проверка ТВОИХ кастомных уровней (/add и /add_once)
+                # 2. Проверка кастомных уровней
                 if symbol in custom_levels and custom_levels[symbol]:
                     to_remove = []
                     for lvl in custom_levels[symbol]:
@@ -195,10 +192,9 @@ async def price_checker():
                         if (last_price < target_price <= current_price) or (last_price > target_price >= current_price):
                             await bot.send_message(
                                 CHAT_ID,
-                                f"🎯 **ДОСТИГНУТ ВАШ УРОВЕНЬ ({symbol})!**\n"
-                                f"Целевой уровень: `{target_price}` USDT\n"
-                                f"Текущая цена: `{current_price}` USDT",
-                                parse_mode="Markdown"
+                                f"ДОСТИГНУТ ВАШ УРОВЕНЬ ({symbol})!\n"
+                                f"Целевой уровень: {target_price} USDT\n"
+                                f"Текущая цена: {current_price} USDT"
                             )
                             if lvl['once']:
                                 to_remove.append(lvl)
@@ -206,7 +202,7 @@ async def price_checker():
                     for item in to_remove:
                         custom_levels[symbol].remove(item)
 
-                # 3. Крупные ликвидации / сбритые позиции
+                # 3. Крупные ликвидации
                 liquidations = get_recent_liquidations(symbol)
                 if liquidations:
                     if symbol not in seen_liquidations:
@@ -221,14 +217,13 @@ async def price_checker():
                             usdt_val = price * float(liq['origQty'])
 
                             if usdt_val >= MIN_LIQ_USDT:
-                                side_text = "🟢 ШОРТЫ СБРИТЫ" if liq['side'] == 'BUY' else "🔴 ЛОНГОВЫЕ ЛИКВИДАЦИИ"
+                                side_text = "ШОРТЫ СБРИТЫ" if liq['side'] == 'BUY' else "ЛОНГОВЫЕ ЛИКВИДАЦИИ"
                                 await bot.send_message(
                                     CHAT_ID,
-                                    f"💥 **КРУПНАЯ ЛИКВИДАЦИЯ ({symbol})!**\n"
+                                    f"КРУПНАЯ ЛИКВИДАЦИЯ ({symbol})!\n"
                                     f"{side_text}\n"
-                                    f"• Цена: `{price}` USDT\n"
-                                    f"• Объем: **${usdt_val:,.0f}**",
-                                    parse_mode="Markdown"
+                                    f"- Цена: {price} USDT\n"
+                                    f"- Объем: ${usdt_val:,.0f}"
                                 )
 
                     if len(seen_liquidations[symbol]) > 50:
