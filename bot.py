@@ -79,7 +79,7 @@ def get_persistent_keyboard():
     builder.button(text="🪙 Монеты в фоне")
     builder.button(text="📊 Статус системы")
     builder.button(text="🗑 Очистить уровни")
-    builder.adjust(2, 2)  две кнопки в ряд
+    builder.adjust(2, 2)
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -223,7 +223,7 @@ async def cmd_clear_levels(message: types.Message):
     await message.answer("Все пользовательские уровни очищены.", reply_markup=get_persistent_keyboard())
 
 
-# ================= Обработка нажатий на инлайн-кнопки (удаление монет/уровней) =================
+# ================= Обработка нажатий на инлайн-кнопки =================
 @dp.callback_query()
 async def callback_handler(callback: types.CallbackQuery):
     data = callback.data
@@ -308,8 +308,6 @@ async def price_checker():
                     to_remove = []
                     for lvl in custom_levels[symbol]:
                         target_price = lvl['price']
-                        if (last_price < target_price <= current_price) or (last_price > target_price >= current_press): # исправлено чуть ниже на current_price
-                            pass
                         if (last_price < target_price <= current_price) or (last_price > target_price >= current_price):
                             await bot.send_message(
                                 CHAT_ID,
